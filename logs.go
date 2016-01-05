@@ -38,7 +38,8 @@ const (
 )
 
 type LoggerInterface interface {
-	Write(data []byte) (int, error)
+	Init()
+	WriteMsg(msg string, level LogLevel) error
 	Close()
 	Flush()
 }
@@ -46,9 +47,13 @@ type LoggerInterface interface {
 // log instance generator
 type LoggerGenerator func() LoggerInterface
 
-var (
+var adapters map[LogType]LoggerGenerator
+
+func init() {
 	adapters = make(map[LogType]LoggerGenerator)
-)
+
+	adapters[LogConsole] = newConsole
+}
 
 type logMsg struct {
 	skip  int
@@ -64,7 +69,16 @@ type Logger struct {
 	quit    chan bool
 }
 
-func newLogger(buffer int64) *Logger {
+func NewLogger() *Logger {
+	numCPU := runtime.NumCPU()
+
+	l := newLogger(numCPU)
+	l.AddLogger(LogConsole)
+
+	return l
+}
+
+func newLogger(buffer int) *Logger {
 	l := &Logger{
 		level:   TRACE,
 		outputs: make(map[LogType]LoggerInterface),
@@ -72,17 +86,17 @@ func newLogger(buffer int64) *Logger {
 		quit:    make(chan bool),
 	}
 
-	go l.StartLogger()
+	go l.startLogger()
 	return l
 }
 
-func (l *Logger) AddLogger(t LogType, config string) error {
+func (l *Logger) AddLogger(t LogType) error {
 	l.Lock()
 	defer l.Unlock()
 
 	if logGen, ok := adapters[t]; ok {
 		logInst := logGen()
-		if err := logInst.Init(config); err != nil {
+		if err := logInst.Init(); err != nil {
 			return err
 		}
 		l.outputs[t] = logInst
@@ -142,7 +156,8 @@ func (l *Logger) writeMsg(skip int, level LogLevel, msg string) error {
 	return nil
 }
 
-func (l *Logger) StartLogger() {
+// 还需处理意外的情况，ctrl+c退出
+func (l *Logger) startLogger() {
 	for {
 		select {
 		case bm := <-l.msgChan:
