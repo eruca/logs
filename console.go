@@ -37,7 +37,8 @@ func newConsole() LoggerInterface {
 	}
 }
 
-func (c *console) WriteMsg(msg string, level LogLevel) error {
+func (c *console) WriteMsg(msg string, skip int, level LogLevel) error {
+	log.Println(msg, skip, level)
 	if c.level > level {
 		return nil
 	}
@@ -48,4 +49,4 @@ func (c *console) WriteMsg(msg string, level LogLevel) error {
 
 func (*console) Flush() {}
 
-func (*console) Close() {}
+func (*console) Destroy() {}

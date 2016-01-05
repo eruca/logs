@@ -2,6 +2,8 @@ package logs
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -38,9 +40,8 @@ const (
 )
 
 type LoggerInterface interface {
-	Init()
-	WriteMsg(msg string, level LogLevel) error
-	Close()
+	WriteMsg(msg string, skip int, level LogLevel) error
+	Destroy()
 	Flush()
 }
 
@@ -53,6 +54,7 @@ func init() {
 	adapters = make(map[LogType]LoggerGenerator)
 
 	adapters[LogConsole] = newConsole
+	adapters[LogFile] = NewFileWriter
 }
 
 type logMsg struct {
@@ -96,9 +98,6 @@ func (l *Logger) AddLogger(t LogType) error {
 
 	if logGen, ok := adapters[t]; ok {
 		logInst := logGen()
-		if err := logInst.Init(); err != nil {
-			return err
-		}
 		l.outputs[t] = logInst
 	} else {
 		panic("log: unknown adapter" + t.String())
@@ -152,17 +151,21 @@ func (l *Logger) writeMsg(skip int, level LogLevel, msg string) error {
 		lm.msg = msg
 	}
 
+	// 删除前后的空格字符
+	lm.msg = strings.TrimSpace(lm.msg)
+
 	l.msgChan <- lm
 	return nil
 }
 
 // 还需处理意外的情况，ctrl+c退出
 func (l *Logger) startLogger() {
+	log.Println("in loop")
 	for {
 		select {
 		case bm := <-l.msgChan:
 			for _, out := range l.outputs {
-				if err := l.writeMsg(bm.msg, bm.skip, bm.level); err != nil {
+				if err := out.WriteMsg(bm.msg, bm.skip, bm.level); err != nil {
 					fmt.Println("ERROR, unable to WriteMsg:", err)
 				}
 			}
@@ -184,37 +187,44 @@ func (l *Logger) Close() {
 }
 func (l *Logger) Trace(format string, v ...interface{}) {
 	msg := fmt.Sprintf("[T] "+format, v...)
-	l.writerMsg(0, TRACE, msg)
+	l.writeMsg(0, TRACE, msg)
 }
 
 func (l *Logger) Debug(format string, v ...interface{}) {
 	msg := fmt.Sprintf("[D] "+format, v...)
-	l.writerMsg(0, DEBUG, msg)
+	l.writeMsg(0, DEBUG, msg)
 }
 
 func (l *Logger) Info(format string, v ...interface{}) {
 	msg := fmt.Sprintf("[I] "+format, v...)
-	l.writerMsg(0, INFO, msg)
+	l.writeMsg(0, INFO, msg)
 }
 
 func (l *Logger) Warn(format string, v ...interface{}) {
 	msg := fmt.Sprintf("[W] "+format, v...)
-	l.writerMsg(0, WARN, msg)
+	l.writeMsg(0, WARN, msg)
 }
 
 func (l *Logger) Error(skip int, format string, v ...interface{}) {
 	msg := fmt.Sprintf("[E] "+format, v...)
-	l.writerMsg(skip, ERROR, msg)
+	l.writeMsg(skip, ERROR, msg)
 }
 
 func (l *Logger) Critical(skip int, format string, v ...interface{}) {
 	msg := fmt.Sprintf("[C] "+format, v...)
-	l.writerMsg(skip, CRITICAL, msg)
+	l.writeMsg(skip, CRITICAL, msg)
 }
 
 func (l *Logger) Fatal(skip int, format string, v ...interface{}) {
 	msg := fmt.Sprintf("[F] "+format, v...)
-	l.writerMsg(skip, FATAL, msg)
+	l.writeMsg(skip, FATAL, msg)
+	l.Flush()
 	l.Close()
 	os.Exit(1)
+}
+
+// utils
+func isExist(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil || os.IsExist(err)
 }
